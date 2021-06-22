@@ -128,7 +128,7 @@ systemctl status docker --no-pager || exit 1
 echo "Docker images pre-pulled:" >> ${VHD_LOGS_FILEPATH}
 
 METRICS_SERVER_VERSIONS="
-0.4.4
+0.5.0
 "
 for METRICS_SERVER_VERSION in ${METRICS_SERVER_VERSIONS}; do
     CONTAINER_IMAGE="mcr.microsoft.com/oss/kubernetes/metrics-server:v${METRICS_SERVER_VERSION}"
@@ -226,12 +226,13 @@ echo "  - busybox" >> ${VHD_LOGS_FILEPATH}
 
 K8S_VERSIONS="
 1.22.0-alpha.1
-1.21.1
-1.20.7
+1.21.2
+1.20.8
 1.20.6-azs
+1.19.12
 1.19.11
 1.19.10-azs
-1.18.19
+1.18.20
 1.18.18-azs
 1.17.17
 1.17.17-azs

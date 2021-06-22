@@ -3826,6 +3826,7 @@ spec:
       serviceAccountName: csi-azuredisk-controller-sa
       nodeSelector:
         kubernetes.io/os: linux
+        kubernetes.io/role: master
       priorityClassName: system-cluster-critical
       tolerations:
         - key: "node-role.kubernetes.io/master"
@@ -4009,6 +4010,7 @@ spec:
       serviceAccountName: csi-snapshot-controller-sa
       nodeSelector:
         kubernetes.io/os: linux
+        kubernetes.io/role: master
       priorityClassName: system-cluster-critical
       tolerations:
         - key: "node-role.kubernetes.io/master"
@@ -5224,6 +5226,7 @@ spec:
       serviceAccountName: csi-azurefile-controller-sa
       nodeSelector:
         kubernetes.io/os: linux
+        kubernetes.io/role: master
       priorityClassName: system-cluster-critical
       tolerations:
         - key: "node-role.kubernetes.io/master"
@@ -8533,7 +8536,10 @@ data:
     import conf.d/Corefile*
     .:53 {
         errors
-        health
+        health {
+          # this should be > readiness probe failure time
+          lameduck 35s
+        }
         ready
         kubernetes {{ContainerConfig "domain"}} in-addr.arpa ip6.arpa {
             pods insecure
@@ -8671,6 +8677,10 @@ spec:
             path: /ready
             port: 8181
             scheme: HTTP
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -10028,6 +10038,7 @@ spec:
         - --secure-port=4443
         - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
         - --kubelet-use-node-status-port
+        - --metric-resolution=15s
         - --kubelet-insecure-tls
         image: {{ContainerImage "metrics-server"}}
         imagePullPolicy: IfNotPresent
@@ -10049,7 +10060,12 @@ spec:
             path: /readyz
             port: https
             scheme: HTTPS
+          initialDelaySeconds: 20
           periodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 200Mi
         securityContext:
           readOnlyRootFilesystem: true
           runAsNonRoot: true
@@ -12389,10 +12405,10 @@ configGPUDrivers() {
   echo blacklist nouveau >>/etc/modprobe.d/blacklist.conf
   retrycmd_no_stats 120 5 25 update-initramfs -u || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
   wait_for_apt_locks
-  dpkg -i $(ls ${APT_CACHE_DIR}libnvidia-container1*) \
-  $(ls ${APT_CACHE_DIR}libnvidia-container-tools*) \
-  $(ls ${APT_CACHE_DIR}nvidia-container-toolkit*) \
-  $(ls ${APT_CACHE_DIR}nvidia-container-runtime*) || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
+  dpkg -i $(ls ${APT_CACHE_DIR}libnvidia-container1*) || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
+  dpkg -i $(ls ${APT_CACHE_DIR}libnvidia-container-tools*) || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
+  dpkg -i $(ls ${APT_CACHE_DIR}nvidia-container-toolkit*) || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
+  dpkg -i $(ls ${APT_CACHE_DIR}nvidia-container-runtime*) || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
   mkdir -p $GPU_DEST/lib64 $GPU_DEST/overlay-workdir
   retrycmd 120 5 25 mount -t overlay -o lowerdir=/usr/lib/x86_64-linux-gnu,upperdir=${GPU_DEST}/lib64,workdir=${GPU_DEST}/overlay-workdir none /usr/lib/x86_64-linux-gnu || exit {{GetCSEErrorCode "ERR_GPU_DRIVERS_CONFIG"}}
   export -f installNvidiaDrivers
@@ -12759,7 +12775,7 @@ if [[ ${OS} == "${UBUNTU_OS_NAME}" ]]; then
 fi
 DOCKER=/usr/bin/docker
 if [[ $UBUNTU_RELEASE == "18.04" ]]; then
-  export GPU_DV=450.80.02
+  export GPU_DV=460.32.03
 else
   export GPU_DV=418.40.04
 fi
@@ -12888,7 +12904,7 @@ apt_get_download() {
   local ret=0
   pushd $APT_CACHE_DIR || return 1
   for i in $(seq 1 $retries); do
-    wait_for_apt_locks; apt-get -o Dpkg::Options::=--force-confold download -y "${1}" && break
+    wait_for_apt_locks; apt-get -o Dpkg::Options::=--force-confold download -y "${@}" && break
     if [ $i -eq $retries ]; then ret=1; else sleep $wait_sleep; fi
   done
   popd || return 1
@@ -13105,7 +13121,7 @@ downloadGPUDrivers() {
   apt_get_update
   retrycmd 30 5 60 curl -fLS https://us.download.nvidia.com/tesla/$GPU_DV/NVIDIA-Linux-x86_64-${GPU_DV}.run -o ${GPU_DEST}/nvidia-drivers-${GPU_DV} || exit 85
   tmpDir=$GPU_DEST/tmp
-  apt_get_download 20 30 libnvidia-container1=1.4.0* libnvidia-container-tools=1.4.0* nvidia-container-toolkit=1.5.0* nvidia-container-runtime=3.5.0*
+  apt_get_download 20 30 libnvidia-container1=1.4.0* libnvidia-container-tools=1.4.0* nvidia-container-toolkit=1.5.0* nvidia-container-runtime=3.5.0* || exit 85
 }
 removeMoby() {
   apt_get_purge moby-engine moby-cli || exit 27
@@ -13904,10 +13920,10 @@ RANDFILE=$(mktemp)
 export RANDFILE
 
 openssl genrsa -out $PROXY_CA_KEY 2048
-openssl req -new -x509 -days 1826 -key $PROXY_CA_KEY -out $PROXY_CRT -subj '/CN=proxyClientCA'
+openssl req -new -x509 -days 262824 -key $PROXY_CA_KEY -out $PROXY_CRT -subj '/CN=proxyClientCA'
 openssl genrsa -out $PROXY_CLIENT_KEY 2048
 openssl req -new -key $PROXY_CLIENT_KEY -out $PROXY_CLIENT_CSR -subj '/CN=aggregator/O=system:masters'
-openssl x509 -req -days 730 -in $PROXY_CLIENT_CSR -CA $PROXY_CRT -CAkey $PROXY_CA_KEY -set_serial 02 -out $PROXY_CLIENT_CRT
+openssl x509 -req -days 262824 -in $PROXY_CLIENT_CSR -CA $PROXY_CRT -CAkey $PROXY_CA_KEY -set_serial 02 -out $PROXY_CLIENT_CRT
 
 write_certs_to_disk() {
   ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_REQUESTHEADER_CLIENT_CA --print-value-only >$K8S_PROXY_CA_CRT_FILEPATH
@@ -13935,13 +13951,13 @@ ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} lock ${PROXY_CERTS_LOCK_NAME} >"${PROXY_
 
 pid=$!
 if read -r lockthis <"${PROXY_CERT_LOCK_FILE}"; then
-  if [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_REQUESTHEADER_CLIENT_CA --print-value-only)" ]]; then
+  if [[ "${OVERRIDE_PROXY_CERTS}" == "true" ]] || [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_REQUESTHEADER_CLIENT_CA --print-value-only)" ]]; then
     ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} put $ETCD_REQUESTHEADER_CLIENT_CA " $(cat ${PROXY_CRT})" >/dev/null 2>&1
   fi
-  if [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_PROXY_KEY --print-value-only)" ]]; then
+  if [[ "${OVERRIDE_PROXY_CERTS}" == "true" ]] || [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_PROXY_KEY --print-value-only)" ]]; then
     ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} put $ETCD_PROXY_KEY " $(cat ${PROXY_CLIENT_KEY})" >/dev/null 2>&1
   fi
-  if [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_PROXY_CERT --print-value-only)" ]]; then
+  if [[ "${OVERRIDE_PROXY_CERTS}" == "true" ]] || [[ "" == "$(ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} get $ETCD_PROXY_CERT --print-value-only)" ]]; then
     ETCDCTL_API=3 etcdctl ${ETCDCTL_PARAMS} put $ETCD_PROXY_CERT " $(cat ${PROXY_CLIENT_CRT})" >/dev/null 2>&1
   fi
 fi
@@ -18133,6 +18149,11 @@ cp_certs() {
 
 cp_proxy() {
   source /etc/environment
+  local NODE_INDEX
+  NODE_INDEX=$(hostname | tail -c 2)
+  if [[ $NODE_INDEX == 0 ]]; then
+    export OVERRIDE_PROXY_CERTS="true"
+  fi
   /etc/kubernetes/generate-proxy-certs.sh
 }
 

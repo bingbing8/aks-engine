@@ -12,7 +12,7 @@ if [[ ${OS} == "${UBUNTU_OS_NAME}" ]]; then
 fi
 DOCKER=/usr/bin/docker
 if [[ $UBUNTU_RELEASE == "18.04" ]]; then
-  export GPU_DV=450.80.02
+  export GPU_DV=460.32.03
 else
   export GPU_DV=418.40.04
 fi
@@ -141,7 +141,7 @@ apt_get_download() {
   local ret=0
   pushd $APT_CACHE_DIR || return 1
   for i in $(seq 1 $retries); do
-    wait_for_apt_locks; apt-get -o Dpkg::Options::=--force-confold download -y "${1}" && break
+    wait_for_apt_locks; apt-get -o Dpkg::Options::=--force-confold download -y "${@}" && break
     if [ $i -eq $retries ]; then ret=1; else sleep $wait_sleep; fi
   done
   popd || return 1
